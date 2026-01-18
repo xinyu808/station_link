@@ -69,70 +69,71 @@ def get_station_pairs(
         max_radius_km: float
 ) -> List[StationLink]:
     """
-    Matches stations between two sets using spatial proximity (KD-Tree).
+    Establish symmetric station pairs between two sets using bi-directional KD-Tree search.
 
-    This function establishes geographically proximal pairs between reference (points_a)
-    and target (points_b) station sets. For each station in points_a, finds the closest
-    station in points_b within max_radius_km. Handles both identical station names (distance≈0)
-    and spatial neighbors (distance>0) automatically.
+    This function performs both A->B and B->A nearest neighbor searches to maximize
+    the number of geographic links, especially useful when seismic networks differ
+    between events. It ensures symmetry while maintaining the identity of Event A
+    and Event B: 'point_a' always originates from 'points_a'.
 
     Key features:
-    - Uses KD-Tree for efficient O(n log n) nearest neighbor search
-    - Automatically prioritizes exact station matches (distance=0) over spatial neighbors
-    - Filters out pairs exceeding max_radius_km
-    - Preserves all original station metadata in StationLink objects
+    - Bi-directional Search: Captures all proximal pairs within max_radius_km.
+    - Identity Preservation: Fixed slotting ensures consistent (A - B) residual math.
+    - Deduplication: Uses (sta_a, sta_b) keys to handle mutual nearest neighbors.
+    - O(n log n) Efficiency: Leverages cKDTree for rapid spatial querying.
 
     Parameters
     ----------
     points_a : List[StationPoint]
-        Reference station set (e.g., event1 stations).
-        Will be matched against points_b.
+        Station set from the first event (Reference).
+        Populates 'point_a' in the resulting StationLink.
     points_b : List[StationPoint]
-        Target station set (e.g., event2 stations).
-        Served as the search pool for points_a.
+        Station set from the second event (Target).
+        Populates 'point_b' in the resulting StationLink.
     max_radius_km : float
-        Maximum search radius (km). Pairs beyond this distance are discarded.
-        Typical value: 500-1000 km (adjust based on seismic network density).
+        Maximum spatial distance (km) for matching. Pairs exceeding this are ignored.
 
     Returns
     -------
     List[StationLink]
-        List of matched station pairs. Each StationLink contains:
-        - point_a: Reference station (from points_a)
-        - point_b: Target station (from points_b)
-        - distance_km: Actual geodesic distance (km) between stations
-        - link_type: "NEIGHBOR" (always for this implementation)
+        List of unique station pairs. Each StationLink contains:
+        - point_a: Station from points_a.
+        - point_b: Station from points_b.
+        - distance_km: Precise ECEF distance (km) between the pair.
+        - link_type: "SAME" or "NEIGHBOR" based on station IDs.
     """
-    # Early exit for empty inputs
     if not points_a or not points_b:
         return []
 
-    # Build KD-Tree from points_b coordinates
-    coords_b = np.array([p.xyz for p in points_b])
-    tree = cKDTree(coords_b)
+    tree_a = cKDTree(np.array([p.xyz for p in points_a]))
+    tree_b = cKDTree(np.array([p.xyz for p in points_b]))
 
-    links = []
+    unique_links: Dict[tuple, StationLink] = {}
 
-    # Search for nearest neighbors in points_b for each point in points_a
-    for p_a in points_a:
-        dist, idx = tree.query(
-            p_a.xyz,
-            k=1,
-            distance_upper_bound=max_radius_km
-        )
+    def search_and_add(source_list, target_tree, target_list, is_reverse: bool):
+        for p_src in source_list:
+            dist, idx = target_tree.query(
+                p_src.xyz,
+                k=1,
+                distance_upper_bound=max_radius_km
+            )
+            if dist == float('inf'):
+                continue
 
-        # Skip if no valid match found within radius
-        if dist == float('inf'):
-            continue
+            p_tgt = target_list[idx]
+            pa, pb = (p_tgt, p_src) if is_reverse else (p_src, p_tgt)
+            link_key = (pa.sta_name, pb.sta_name)
 
-        # Retrieve matched station from points_b
-        p_b = points_b[idx]
+            if link_key not in unique_links:
+                unique_links[link_key] = StationLink(
+                    point_a=pa,
+                    point_b=pb,
+                    distance_km=float(dist)
+                )
 
-        # Create StationLink object with distance
-        links.append(StationLink(
-            point_a=p_a,
-            point_b=p_b,
-            distance_km=float(dist)
-        ))
+    # Forward: A → B
+    search_and_add(points_a, tree_b, points_b, is_reverse=False)
+    # Reverse: B → A (captures additional pairs)
+    search_and_add(points_b, tree_a, points_a, is_reverse=True)
 
-    return links
+    return list(unique_links.values())
