@@ -3,7 +3,7 @@ from typing import Dict, List
 import numpy as np
 from scipy.spatial import cKDTree
 
-from .utils import geo_coord2xyz, get_core_phase_time
+from .utils import geo_coord2xyz, get_core_phase_time, get_core_phase_amp
 from .model import StationPoint, StationLink, StationInfo, SeismicEvent
 
 
@@ -41,6 +41,7 @@ def get_station_point(
 
     # Compute travel-time residuals
     residual_dict = get_core_phase_time(st, event_info)
+    amplitude_dict = get_core_phase_amp(st, event_info)
 
     # Merge to make up StationPoint class
     import numpy as np
@@ -48,15 +49,23 @@ def get_station_point(
     for sta_id, static_base in static_info_dict.items():
 
         res_val = residual_dict.get(sta_id)
+        amp_val = amplitude_dict.get(sta_id)
+
         if res_val is None or np.isnan(res_val):
+            continue
+        if amp_val is None or np.isnan(amp_val):
             continue
 
         stations_point.append(
             StationPoint(
-                sta_name=sta_id,
+                station_id=sta_id,
                 ev_id=ev_id,
+                latitude=static_base.lat,
+                longitude=static_base.lon,
+                elevation=static_base.elev,
                 xyz=static_base.xyz,
-                residual=res_val
+                residual=res_val,
+                amplitude=amp_val
             )
         )
 
