@@ -98,10 +98,24 @@ class StationInfo:
 ```python
 @dataclass(frozen=True)
 class StationPoint:
-    sta_name: str                   # 台站名
-    ev_id: str                      # 事件ID (通常为日期格式 %Y-%m-%d)
-    xyz: Tuple[float, float, float] # 高精度 ECEF 直角坐标 (单位: km)
-    residual: float                 # 计算好的走时残差 (Obs - Ref)
+    """
+    Spatial coordinates of sampling points,
+    along with amplitudes and travel times.
+    """
+    # id tag
+    station_id: str  # f"{network}.{station}"
+    ev_id: str  # f"{year}-{month}-{day}"
+
+    # coordinate
+    latitude: float
+    longitude: float
+    elevation: float  # km
+    xyz: Tuple[float, float, float]  # XYZ for KD-Tree
+
+    # waveform information
+    residual: Optional[float] = field(default=None, compare=False, hash=False)
+    # amp: log10[PKiKP/PcP]
+    amplitude: Optional[float] = field(default=None, compare=False, hash=False)
 ```
 ---
 - 结果模型：StationLink (最终配对链接)
@@ -120,7 +134,7 @@ class StationLink:
     def id(self) -> str:
         """生成唯一的 ID (A-B 和 B-A 相同)"""
         names = sorted(
-            [self.point_a.sta_name, self.point_b.sta_name]
+            [self.point_a.station_id, self.point_b.station_id]
         )
         return f"{names[0]}-{names[1]}"
 
@@ -129,8 +143,8 @@ class StationLink:
         """
         判断链接类型
         """
-        a_sta_name = self.point_a.sta_name
-        b_sta_name = self.point_b.sta_name
+        a_sta_name = self.point_a.station_id
+        b_sta_name = self.point_b.station_id
 
         if a_sta_name == b_sta_name:
             return "SAME"
@@ -139,4 +153,8 @@ class StationLink:
     @property
     def res_diff(self) -> float:
         return self.point_a.residual - self.point_b.residual
+
+    @property
+    def amp_diff(self) -> float:
+        return self.point_a.amplitude - self.point_b.amplitude
 ```

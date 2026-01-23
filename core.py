@@ -131,7 +131,7 @@ def get_station_pairs(
 
             p_tgt = target_list[idx]
             pa, pb = (p_tgt, p_src) if is_reverse else (p_src, p_tgt)
-            link_key = (pa.sta_name, pb.sta_name)
+            link_key = (pa.station_id, pb.station_id)
 
             if link_key not in unique_links:
                 unique_links[link_key] = StationLink(
